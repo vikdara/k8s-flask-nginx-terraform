@@ -42,39 +42,63 @@ resource "kubernetes_role_binding" "pod_reader_binding" {
 }
 
 
-# Deployment
-resource "kubernetes_deployment" "pod_check_deployment" {
+# ConfigMap for nginx.conf
+resource "kubernetes_config_map" "nginx_config" {
   metadata {
-    name      = "pod-check-deployment"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
-    labels = {
-      app = "pod-check"
-    }
+    name      = "nginx-config"
+    namespace = "pod-check"
   }
 
+  data = {
+    "default.conf" = <<-EOT
+      server {
+          listen 80;
+          location / {
+              proxy_pass http://localhost:5000;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+          }
+      }
+    EOT
+  }
+}
+
+# Deployment update (add nginx container)
+resource "kubernetes_deployment" "pod_check" {
+  # ... your existing deployment config ...
   spec {
-    replicas = 1
-
-    selector {
-      match_labels = {
-        app = "pod-check"
-      }
-    }
-
     template {
-      metadata {
-        labels = {
-          app = "pod-check"
-        }
-      }
-
       spec {
         container {
-          name  = "pod-check"
-          image = "vikasappperfect/pod-check"
-
+          name  = "flask-app"
+          image = "vikasappperfect/pod-check:latest"
           port {
             container_port = 5000
+          }
+        }
+
+        container {
+          name  = "nginx"
+          image = "nginx:stable-alpine"
+          port {
+            container_port = 80
+          }
+
+          volume_mount {
+            name       = "nginx-config-volume"
+            mount_path = "/etc/nginx/conf.d/default.conf"
+            sub_path   = "default.conf"
+          }
+        }
+
+        volume {
+          name = "nginx-config-volume"
+          config_map {
+            name = kubernetes_config_map.nginx_config.metadata[0].name
+            items {
+              key  = "default.conf"
+              path = "default.conf"
+            }
           }
         }
       }
@@ -82,27 +106,55 @@ resource "kubernetes_deployment" "pod_check_deployment" {
   }
 }
 
-# Service
+# Service update to expose port 80
 resource "kubernetes_service" "pod_check_service" {
   metadata {
     name      = "pod-check-service"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    namespace = "pod-check"
   }
 
   spec {
     selector = {
-      app = "pod-check"
+      app = kubernetes_deployment.pod_check.metadata[0].labels.app
     }
 
     port {
+      port        = 80
+      target_port = 80
       protocol    = "TCP"
-      port        = 5000
-      target_port = 5000
     }
 
     type = "ClusterIP"
+  }
+}
 
+# Ingress resource
+resource "kubernetes_ingress" "pod_check_ingress" {
+  metadata {
+    name      = "pod-check-ingress"
+    namespace = "pod-check"
+    annotations = {
+      "nginx.ingress.kubernetes.io/rewrite-target" = "/"
+    }
+  }
 
-    
+  spec {
+    rule {
+      host = "vikas.appperfect.com"
+      http {
+        path {
+          path     = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = kubernetes_service.pod_check_service.metadata[0].name
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
