@@ -9,6 +9,7 @@ resource "kubernetes_namespace" "pod_check" {
   }
 }
 
+# Role to allow pod listing
 resource "kubernetes_role" "pod_reader" {
   metadata {
     name      = "pod-reader"
@@ -22,6 +23,7 @@ resource "kubernetes_role" "pod_reader" {
   }
 }
 
+# Role binding
 resource "kubernetes_role_binding" "pod_reader_binding" {
   metadata {
     name      = "pod-reader-binding"
@@ -41,12 +43,11 @@ resource "kubernetes_role_binding" "pod_reader_binding" {
   }
 }
 
-
 # ConfigMap for nginx.conf
 resource "kubernetes_config_map" "nginx_config" {
   metadata {
     name      = "nginx-config"
-    namespace = "pod-check"
+    namespace = kubernetes_namespace.pod_check.metadata[0].name
   }
 
   data = {
@@ -63,15 +64,35 @@ resource "kubernetes_config_map" "nginx_config" {
   }
 }
 
-# Deployment update (add nginx container)
+# Deployment with Flask + Nginx
 resource "kubernetes_deployment" "pod_check" {
-  # ... your existing deployment config ...
+  metadata {
+    name      = "pod-check-deployment"
+    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    labels = {
+      app = "pod-check"
+    }
+  }
+
   spec {
+    replicas = 1
+    selector {
+      match_labels = {
+        app = "pod-check"
+      }
+    }
+
     template {
+      metadata {
+        labels = {
+          app = "pod-check"
+        }
+      }
+
       spec {
         container {
           name  = "flask-app"
-          image = "vikasappperfect/pod-check:latest"
+          image = "nightridervikas/pod-check:latest"
           port {
             container_port = 5000
           }
@@ -83,6 +104,17 @@ resource "kubernetes_deployment" "pod_check" {
           port {
             container_port = 80
           }
+          liveness_probe {
+            http_get {
+              path   = "/"
+              port   = 80
+      
+            }
+           
+          }
+          
+         
+          
 
           volume_mount {
             name       = "nginx-config-volume"
@@ -106,16 +138,16 @@ resource "kubernetes_deployment" "pod_check" {
   }
 }
 
-# Service update to expose port 80
+# ClusterIP Service
 resource "kubernetes_service" "pod_check_service" {
   metadata {
     name      = "pod-check-service"
-    namespace = "pod-check"
+    namespace = kubernetes_namespace.pod_check.metadata[0].name
   }
 
   spec {
     selector = {
-      app = kubernetes_deployment.pod_check.metadata[0].labels.app
+      app = "pod-check"
     }
 
     port {
@@ -128,23 +160,32 @@ resource "kubernetes_service" "pod_check_service" {
   }
 }
 
-# Ingress resource
-resource "kubernetes_ingress" "pod_check_ingress" {
+# Ingress with HTTP only (TLS disabled)
+resource "kubernetes_ingress_v1" "pod_check_ingress" {
   metadata {
     name      = "pod-check-ingress"
     namespace = "pod-check"
     annotations = {
-      "nginx.ingress.kubernetes.io/rewrite-target" = "/"
+      "nginx.ingress.kubernetes.io/rewrite-target"     = "/"
+      "nginx.ingress.kubernetes.io/ssl-redirect"       = "true"
+      "nginx.ingress.kubernetes.io/ssl-passthrough"    = "true"
+
     }
   }
 
   spec {
+    tls {
+      hosts      = ["vikas.appperfect.com"]
+      secret_name = "vikas-tls-cert"
+    }
+
     rule {
       host = "vikas.appperfect.com"
       http {
         path {
-          path     = "/"
+          path      = "/"
           path_type = "Prefix"
+
           backend {
             service {
               name = kubernetes_service.pod_check_service.metadata[0].name
@@ -158,3 +199,4 @@ resource "kubernetes_ingress" "pod_check_ingress" {
     }
   }
 }
+
