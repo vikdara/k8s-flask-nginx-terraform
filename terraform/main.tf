@@ -58,8 +58,9 @@ resource "kubernetes_config_map" "nginx_config" {
           server_name vikas.appperfect.com;
 
           location / {
-              auth_basic "Restricted Content";
-              auth_basic_user_file /etc/nginx/auth/.htpasswd;
+            auth_basic "Restricted Area";
+        auth_basic_user_file /etc/nginx/auth/.htpasswd;
+      
               proxy_pass http://127.0.0.1:5000;
 
               proxy_set_header Host $host;
@@ -123,11 +124,14 @@ resource "kubernetes_deployment" "pod_check" {
           }
 
           volume_mount {
-            name       = "nginx-auth-volume"
-            mount_path = "/etc/nginx/auth/.htpasswd"
-            sub_path   = ".htpasswd"
-            read_only  = true
-          }
+  name       = "nginx-auth-volume"
+  mount_path = "/etc/nginx/auth/.htpasswd"
+  sub_path   = ".htpasswd"
+  read_only  = true
+}
+
+
+          
         }
 
         volume {
@@ -142,19 +146,21 @@ resource "kubernetes_deployment" "pod_check" {
             }
           }
         }
+      
+volume {
+  name = "nginx-auth-volume"
 
-        volume {
-          name = "nginx-auth-volume"
+  secret {
+    secret_name = kubernetes_secret.nginx_basic_auth.metadata[0].name
 
-          secret {
-            secret_name = kubernetes_secret.nginx_basic_auth.metadata[0].name
+    items {
+      key  = "auth"
+      path = ".htpasswd"
+    }
+  }
+}
 
-            items {
-              key  = "auth"
-              path = ".htpasswd"
-            }
-          }
-        }
+       
       }
     }
   }
@@ -223,16 +229,16 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
   }
 }
 
+
 resource "kubernetes_secret" "nginx_basic_auth" {
   metadata {
     name      = "nginx-basic-auth"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    namespace = "pod-check"
   }
 
   data = {
-    auth = "dmlrYXM6JGFwcjEkUmkyUEh4bzYkTHBzT0RqYk9UL1ZkT2M5emE3NWRBMA=="
+    auth = file("${path.module}/.htpasswd") # <-- File must exist in your Terraform directory
   }
-
 
   type = "Opaque"
 }

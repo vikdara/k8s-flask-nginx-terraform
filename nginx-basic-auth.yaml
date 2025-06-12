@@ -1,0 +1,8 @@
+apiVersion: v1
+data:
+  auth: dmlrYXM6JGFwcjEkdnUzRC5XeE0kZ0N0NEdKMXd0UTNtTS5BSllpNnBTLwo=
+kind: Secret
+metadata:
+  creationTimestamp: null
+  name: nginx-basic-auth
+  namespace: pod-check
