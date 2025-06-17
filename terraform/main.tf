@@ -1,54 +1,36 @@
-# to interact wih the Kubernetes cluster
-provider "kubernetes" {   
+# Configure Kubernetes provider
+provider "kubernetes" {
   config_path = "~/.kube/config"
 }
 
-# Namespace
-resource "kubernetes_namespace" "pod_check" {
+# ───────────────────────────── FIX START: ServiceAccount ─────────────────────────────
+resource "kubernetes_service_account" "flask_service_account" {
   metadata {
-    name = "pod-check"
+    name      = "flask-serviceaccount"
+    namespace = "default"
   }
 }
+# ───────────────────────────── FIX END ─────────────────────────────
 
-# Role to allow pod listing
-resource "kubernetes_role" "pod_reader" {
+# Secret for HTTP basic auth
+resource "kubernetes_secret" "nginx_basic_auth" {
   metadata {
-    name      = "pod-reader"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    name      = "nginx-basic-auth"
+    namespace = "default"
   }
 
-  rule {
-    api_groups = [""]
-    resources  = ["pods"]
-    verbs      = ["get", "list", "watch"]
+  data = {
+    auth = filebase64("${path.module}/.htpasswd")
   }
+
+  type = "Opaque"
 }
 
-# Role binding
-resource "kubernetes_role_binding" "pod_reader_binding" {
-  metadata {
-    name      = "pod-reader-binding"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
-  }
-
-  role_ref {
-    api_group = "rbac.authorization.k8s.io"
-    kind      = "Role"
-    name      = kubernetes_role.pod_reader.metadata[0].name
-  }
-
-  subject {
-    kind      = "ServiceAccount"
-    name      = "default"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
-  }
-}
-
-# ConfigMap for nginx.conf
+# ConfigMap for NGINX config
 resource "kubernetes_config_map" "nginx_config" {
   metadata {
     name      = "nginx-config"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    namespace = "default"
   }
 
   data = {
@@ -58,11 +40,10 @@ resource "kubernetes_config_map" "nginx_config" {
           server_name vikas.appperfect.com;
 
           location / {
-            auth_basic "Restricted Area";
-        auth_basic_user_file /etc/nginx/auth/.htpasswd;
-      
-              proxy_pass http://127.0.0.1:5000;
+              auth_basic "Restricted Area";
+              auth_basic_user_file /etc/nginx/auth/.htpasswd;
 
+              proxy_pass http://flask-service:5000;
               proxy_set_header Host $host;
               proxy_set_header X-Real-IP $remote_addr;
           }
@@ -71,140 +52,241 @@ resource "kubernetes_config_map" "nginx_config" {
   }
 }
 
-
-# Deployment with Flask + Nginx
-resource "kubernetes_deployment" "pod_check" {
+# Flask Pod runs only on tainted nodes for flask
+resource "kubernetes_pod" "flask_pod" {
   metadata {
-    name      = "pod-check-deployment"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    name      = "flask-pod"
+    namespace = "default"
     labels = {
-      app = "pod-check"
+      app = "flask"
     }
   }
 
   spec {
-    replicas = 1
+    service_account_name = kubernetes_service_account.flask_service_account.metadata[0].name
 
-    selector {
-      match_labels = {
-        app = "pod-check"
+    container {
+      name  = "flask"
+      image = "vikasappperfect/namespace:latest"
+
+      port {
+        container_port = 5000
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/"
+          port = 5000
+        }
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        failure_threshold     = 3
+      }
+
+      readiness_probe {
+        http_get {
+          path = "/"
+          port = 5000
+        }
+        initial_delay_seconds = 5
+        period_seconds        = 5
       }
     }
 
-    template {
-      metadata {
-        labels = {
-          app = "pod-check"
-        }
-      }
+    toleration {
+      key      = "app"
+      operator = "Equal"
+      value    = "flask"
+      effect   = "NoSchedule"
+    }
 
-      spec {
-        container {
-          name  = "flask-app"
-          image = "nightridervikas/pod-check:latest"
-
-          port {
-            container_port = 5000
-          }
-        }
-
-        container {
-          name  = "nginx"
-          image = "nginx:stable-alpine"
-
-          port {
-            container_port = 80
-          }
-
-          volume_mount {
-            name       = "nginx-config-volume"
-            mount_path = "/etc/nginx/conf.d/default.conf"
-            sub_path   = "default.conf"
-            read_only  = true
-          }
-
-          volume_mount {
-  name       = "nginx-auth-volume"
-  mount_path = "/etc/nginx/auth/.htpasswd"
-  sub_path   = ".htpasswd"
-  read_only  = true
-}
-
-
-          
-        }
-
-        volume {
-          name = "nginx-config-volume"
-
-          config_map {
-            name = kubernetes_config_map.nginx_config.metadata[0].name
-
-            items {
-              key  = "default.conf"
-              path = "default.conf"
-            }
-          }
-        }
-      
-volume {
-  name = "nginx-auth-volume"
-
-  secret {
-    secret_name = kubernetes_secret.nginx_basic_auth.metadata[0].name
-
-    items {
-      key  = "auth"
-      path = ".htpasswd"
+    node_selector = {
+      role = "flask"
     }
   }
 }
 
-       
-      }
-    }
-  }
-}
-
-
-# ClusterIP Service
-resource "kubernetes_service" "pod_check_service" {
+# NGINX Pod runs on untainted nodes
+resource "kubernetes_pod" "nginx_pod" {
   metadata {
-    name      = "pod-check-service"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    name      = "nginx-pod"
+    namespace = "default"
+    labels = {
+      app = "nginx"
+    }
+  }
+
+  spec {
+    container {
+      name  = "nginx"
+      image = "nginx:latest"
+
+      port {
+        container_port = 80
+      }
+
+      volume_mount {
+        name       = "nginx-config-volume"
+        mount_path = "/etc/nginx/conf.d/default.conf"
+        sub_path   = "default.conf"
+        read_only  = true
+      }
+
+      volume_mount {
+        name       = "nginx-auth-volume"
+        mount_path = "/etc/nginx/auth/.htpasswd"
+        sub_path   = ".htpasswd"
+        read_only  = true
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/"
+          port = 80
+        }
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        failure_threshold     = 3
+      }
+
+      readiness_probe {
+        http_get {
+          path = "/"
+          port = 80
+        }
+        initial_delay_seconds = 5
+        period_seconds        = 5
+      }
+    }
+
+    volume {
+      name = "nginx-config-volume"
+
+      config_map {
+        name = kubernetes_config_map.nginx_config.metadata[0].name
+
+        items {
+          key  = "default.conf"
+          path = "default.conf"
+        }
+      }
+    }
+
+    volume {
+      name = "nginx-auth-volume"
+
+      secret {
+        secret_name = kubernetes_secret.nginx_basic_auth.metadata[0].name
+
+        items {
+          key  = "auth"
+          path = ".htpasswd"
+        }
+      }
+    }
+
+    toleration {
+      key      = "app"
+      operator = "Equal"
+      value    = "flask"
+      effect   = "NoSchedule"
+    }
+
+    node_selector = {
+      role = "nginx"
+    }
+  }
+}
+
+# Service for Flask app
+resource "kubernetes_service" "flask_service" {
+  metadata {
+    name      = "flask-service"
+    namespace = "default"
   }
 
   spec {
     selector = {
-      app = "pod-check"
+      app = "flask"
     }
 
     port {
-      port        = 80    # Port exposed by the service
-    target_port =  80   # Port on the container to forward traffic to
+      port        = 5000
+      target_port = 5000
       protocol    = "TCP"
     }
-
-    type = "ClusterIP"          # This service type is used for internal communication within the cluster
   }
 }
 
-# Ingress with HTTP only (TLS disabled)
+# Service for NGINX
+resource "kubernetes_service" "nginx_service" {
+  metadata {
+    name      = "nginx-service"
+    namespace = "default"
+  }
+
+  spec {
+    selector = {
+      app = "nginx"
+    }
+
+    port {
+      port        = 80
+      target_port = 80
+      protocol    = "TCP"
+    }
+
+    type = "ClusterIP"
+  }
+}
+
+# ClusterRole with namespaces access
+resource "kubernetes_cluster_role" "pod_reader" {
+  metadata {
+    name = "pod-reader-global"
+  }
+
+  rule {
+    api_groups = [""]
+    resources  = ["pods", "namespaces"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+# Bind ServiceAccount to ClusterRole
+resource "kubernetes_cluster_role_binding" "read_pods_global" {
+  metadata {
+    name = "pod-reader-binding-global"
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role.pod_reader.metadata[0].name
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account.flask_service_account.metadata[0].name
+    namespace = "default"
+  }
+}
+
+# Ingress
 resource "kubernetes_ingress_v1" "pod_check_ingress" {
   metadata {
     name      = "pod-check-ingress"
-    namespace = "pod-check"
-    annotations = {    # used to configure the ingress controller
-      "nginx.ingress.kubernetes.io/rewrite-target"     = "/"
-      "nginx.ingress.kubernetes.io/ssl-redirect"       = "true"
-      "nginx.ingress.kubernetes.io/ssl-passthrough"    = "true"
-
+    namespace = "default"
+    annotations = {
+      "nginx.ingress.kubernetes.io/rewrite-target"  = "/"
+      "nginx.ingress.kubernetes.io/ssl-redirect"    = "true"
+      "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"
     }
   }
 
   spec {
-    tls {      # TLS configuration for the Ingress
-      hosts      = ["vikas.appperfect.com"]
+    tls {
+      hosts       = ["vikas.appperfect.com"]
       secret_name = "vikas-tls-cert"
     }
 
@@ -217,7 +299,7 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
 
           backend {
             service {
-              name = kubernetes_service.pod_check_service.metadata[0].name
+              name = kubernetes_service.nginx_service.metadata[0].name
               port {
                 number = 80
               }
@@ -229,18 +311,23 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
   }
 }
 
-
-resource "kubernetes_secret" "nginx_basic_auth" {
+# Namespace to test cross-namespace pod visibility
+resource "kubernetes_namespace" "pod_check" {
   metadata {
-    name      = "nginx-basic-auth"
-    namespace = "pod-check"
+    name = "pod-check"
   }
-
-  data = {
-    auth = file("${path.module}/.htpasswd") # <-- File must exist in your Terraform directory
-  }
-
-  type = "Opaque"
 }
 
+resource "kubernetes_pod" "test_pod_default" {
+  metadata {
+    name      = "test-pod-default"
+    namespace = kubernetes_namespace.pod_check.metadata[0].name
+  }
 
+  spec {
+    container {
+      name  = "nginx"
+      image = "nginx:latest"
+    }
+  }
+}
