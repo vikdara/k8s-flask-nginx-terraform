@@ -1,18 +1,18 @@
 # Configure Kubernetes provider
 provider "kubernetes" {
-  config_path = "~/.kube/config"
+  config_path = "~/.kube/config" # this is the config path 
 }
 
-# ───────────────────────────── FIX START: ServiceAccount ─────────────────────────────
-resource "kubernetes_service_account" "flask_service_account" {
-  metadata {
+
+resource "kubernetes_service_account" "flask_service_account" { # create a service account which help in  crucial for managing the identity and permissions of pods 
+  metadata {                                                    # default service account do not have much permissions
     name      = "flask-serviceaccount"
     namespace = "default"
   }
 }
-# ───────────────────────────── FIX END ─────────────────────────────
 
-# Secret for HTTP basic auth
+
+# Secret for HTTP basic auth   used for storing sensitive data 
 resource "kubernetes_secret" "nginx_basic_auth" {
   metadata {
     name      = "nginx-basic-auth"
@@ -20,8 +20,10 @@ resource "kubernetes_secret" "nginx_basic_auth" {
   }
 
   data = {
-    auth = filebase64("${path.module}/.htpasswd")
-  }
+
+    auth = file("${path.module}/.htpasswd") # ${path.module} refers to the current Terraform module folder and there we have the file htpasswd  .
+  }                                         # terraform read the content of the file for the auth 
+
 
   type = "Opaque"
 }
@@ -29,18 +31,23 @@ resource "kubernetes_secret" "nginx_basic_auth" {
 # ConfigMap for NGINX config
 resource "kubernetes_config_map" "nginx_config" {
   metadata {
-    name      = "nginx-config"
+    name      = "nginx-config" # ConfigMaps store non-sensitive configuration files, env values, etc.
     namespace = "default"
   }
 
-  data = {
+  data = { # default.conf is the name of the file that will be mounted inside the NGINX pod.
     "default.conf" = <<-EOF
       server {
           listen 80;
           server_name vikas.appperfect.com;
 
+           location /healthz {
+                return 200 'OK';
+                 add_header Content-Type text/plain;
+            }
+
           location / {
-              auth_basic "Restricted Area";
+              auth_basic "Restricted Area";                
               auth_basic_user_file /etc/nginx/auth/.htpasswd;
 
               proxy_pass http://flask-service:5000;
@@ -58,12 +65,12 @@ resource "kubernetes_pod" "flask_pod" {
     name      = "flask-pod"
     namespace = "default"
     labels = {
-      app = "flask"
+      app = "flask" # Used for selecting this pod via Services 
     }
   }
 
   spec {
-    service_account_name = kubernetes_service_account.flask_service_account.metadata[0].name
+    service_account_name = kubernetes_service_account.flask_service_account.metadata[0].name # specifies which account used for RBAC
 
     container {
       name  = "flask"
@@ -78,9 +85,9 @@ resource "kubernetes_pod" "flask_pod" {
           path = "/"
           port = 5000
         }
-        initial_delay_seconds = 10
-        period_seconds        = 10
-        failure_threshold     = 3
+        initial_delay_seconds = 3
+        period_seconds        = 3
+
       }
 
       readiness_probe {
@@ -88,9 +95,14 @@ resource "kubernetes_pod" "flask_pod" {
           path = "/"
           port = 5000
         }
-        initial_delay_seconds = 5
-        period_seconds        = 5
+        initial_delay_seconds = 3
+        period_seconds        = 3
+
       }
+
+
+
+
     }
 
     toleration {
@@ -125,6 +137,31 @@ resource "kubernetes_pod" "nginx_pod" {
         container_port = 80
       }
 
+      liveness_probe {
+        http_get {
+          path = "/healthz"
+          port = 80
+        }
+        initial_delay_seconds = 3
+        timeout_seconds       = 1
+        period_seconds        = 3
+      }
+      readiness_probe {
+        http_get {
+          path = "/healthz"
+          port = 80
+        }
+        initial_delay_seconds = 3
+        timeout_seconds       = 1
+        period_seconds        = 3
+      }
+
+
+
+
+
+
+
       volume_mount {
         name       = "nginx-config-volume"
         mount_path = "/etc/nginx/conf.d/default.conf"
@@ -135,28 +172,13 @@ resource "kubernetes_pod" "nginx_pod" {
       volume_mount {
         name       = "nginx-auth-volume"
         mount_path = "/etc/nginx/auth/.htpasswd"
-        sub_path   = ".htpasswd"
+        sub_path   = ".htpasswd" #at this intially i am using the auth there and when i check the logs of nginx pod i got the error that is it a directory and get error 500 internal server error 
         read_only  = true
       }
 
-      liveness_probe {
-        http_get {
-          path = "/"
-          port = 80
-        }
-        initial_delay_seconds = 10
-        period_seconds        = 10
-        failure_threshold     = 3
-      }
 
-      readiness_probe {
-        http_get {
-          path = "/"
-          port = 80
-        }
-        initial_delay_seconds = 5
-        period_seconds        = 5
-      }
+
+
     }
 
     volume {
@@ -188,7 +210,7 @@ resource "kubernetes_pod" "nginx_pod" {
     toleration {
       key      = "app"
       operator = "Equal"
-      value    = "flask"
+      value    = "nginx"
       effect   = "NoSchedule"
     }
 
@@ -311,20 +333,20 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
   }
 }
 
-# Namespace to test cross-namespace pod visibility
+# Namespace to test the namespace is created or not 
 resource "kubernetes_namespace" "pod_check" {
   metadata {
-    name = "pod-check"
+    name = "pod-check" #this is the namespace for the new pod creation 
   }
 }
 
 resource "kubernetes_pod" "test_pod_default" {
   metadata {
     name      = "test-pod-default"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name
+    namespace = kubernetes_namespace.pod_check.metadata[0].name # this is the new pod with name 
   }
 
-  spec {
+  spec { # these are the spec for the new pod
     container {
       name  = "nginx"
       image = "nginx:latest"

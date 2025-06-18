@@ -1,0 +1,8 @@
+apiVersion: v1
+data:
+  auth: dmlrYXM6JGFwcjEkOThCYllqcXEkcXJRRGJYYlRvbzk4VExTY1VPMVA1LwoK
+kind: Secret
+metadata:
+  creationTimestamp: null
+  name: nginx-basic-auth
+  namespace: default
