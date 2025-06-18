@@ -100,21 +100,22 @@ resource "kubernetes_pod" "flask_pod" {
 
       }
 
-
-
-
+                                        # taint is way to tell the schuduler that on this node you cannnot schedule the pod
+                                        # IF A  node is tainted but you still want to schudule the pod on that node then it is toleration 
+                                        # if a node is untained and you schudule the pod on it then you again taint the node then there will no effect on it 
     }
 
     toleration {
-      key      = "app"
+      key      = "app"             # that node having key is app = flask then you have to no schudle it 
       operator = "Equal"
       value    = "flask"
       effect   = "NoSchedule"
     }
 
-    node_selector = {
-      role = "flask"
-    }
+    node_selector = {               # this pod is schdule on that node having label name  role=flask.
+      role = "flask"                # if pod do not match with the label then it will be in pending state.
+    }                                # Reason: "No matching node for nodeSelector"
+                                      # other option is node affinity 
   }
 }
 
@@ -165,7 +166,7 @@ resource "kubernetes_pod" "nginx_pod" {
       volume_mount {
         name       = "nginx-config-volume"
         mount_path = "/etc/nginx/conf.d/default.conf"
-        sub_path   = "default.conf"
+        sub_path   = "default.conf"      # 	Mount just one file (default.conf) from the volume, not the whole folder
         read_only  = true
       }
 
@@ -184,10 +185,10 @@ resource "kubernetes_pod" "nginx_pod" {
     volume {
       name = "nginx-config-volume"
 
-      config_map {
+      config_map {                     # Volume ka data ConfigMap se aayega
         name = kubernetes_config_map.nginx_config.metadata[0].name
 
-        items {
+        items {                          # mount only specific keys from the ConfigMap instead of all of them
           key  = "default.conf"
           path = "default.conf"
         }
@@ -219,8 +220,8 @@ resource "kubernetes_pod" "nginx_pod" {
     }
   }
 }
-
-# Service for Flask app
+# Provide a stable IP and DNS name to access a set of Pods (selected via labels)
+# Service for Flask app 
 resource "kubernetes_service" "flask_service" {
   metadata {
     name      = "flask-service"
@@ -228,8 +229,8 @@ resource "kubernetes_service" "flask_service" {
   }
 
   spec {
-    selector = {
-      app = "flask"
+    selector = {         # Service unhi pods ko target karega jinke label me app=flask
+      app = "flask"       #  this service will route traffic to that pod via http://flask-service:5000 inside the cluster.
     }
 
     port {
@@ -253,12 +254,12 @@ resource "kubernetes_service" "nginx_service" {
     }
 
     port {
-      port        = 80
-      target_port = 80
+      port        = 80       # svc listens on 80
+      target_port = 80      # Pod's container also exposes port 80
       protocol    = "TCP"
     }
 
-    type = "ClusterIP"
+    type = "ClusterIP"          # Default — means service is only accessible inside the cluster
   }
 }
 
@@ -299,17 +300,17 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
   metadata {
     name      = "pod-check-ingress"
     namespace = "default"
-    annotations = {
-      "nginx.ingress.kubernetes.io/rewrite-target"  = "/"
-      "nginx.ingress.kubernetes.io/ssl-redirect"    = "true"
-      "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"
+    annotations = {               # extra instruction 
+      "nginx.ingress.kubernetes.io/rewrite-target"  = "/"   #"Jo bhi path aaye — /something, use replace karke / bana do."
+      "nginx.ingress.kubernetes.io/ssl-redirect"    = "true"         # 	Automatically redirect HTTP → HTTPS
+      "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"         # 	TLS traffic directly passed to backend (used if backend like NGINX terminates TLS)
     }
   }
 
   spec {
-    tls {
+    tls {            # used for https configuration 
       hosts       = ["vikas.appperfect.com"]
-      secret_name = "vikas-tls-cert"
+      secret_name = "vikas-tls-cert"   # "SSL certificate aur private key is secret me milega jiska naam vikas-tls-cert ha
     }
 
     rule {
@@ -317,7 +318,9 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
       http {
         path {
           path      = "/"
-          path_type = "Prefix"
+          path_type = "Prefix"          #  path_type = "Prefix"
+                                        # Means: match any path that starts with /
+                                         #Agar aap Exact use karte to sirf / match hota
 
           backend {
             service {
@@ -353,3 +356,19 @@ resource "kubernetes_pod" "test_pod_default" {
     }
   }
 }
+
+
+
+User → https://vikas.appperfect.com/home
+     ↓
+Ingress checks host + path:
+    - Host = vikas.appperfect.com ✅
+    - Path starts with / ✅
+     ↓
+Ingress sends request to:
+    nginx-service:80 (ClusterIP)
+     ↓
+NGINX Pod (container on port 80)
+     ↓
+NGINX reverse-proxies to flask-service:5000
+
