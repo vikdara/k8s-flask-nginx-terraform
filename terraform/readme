@@ -1,0 +1,67 @@
+kubectl exec -it sa-test-pod -- /bin/sh
+# 📌 Enter the test pod shell
+
+# Inside pod, try:
+kubectl get pods
+kubectl get namespaces
+
+kubectl apply -f pod-check.yaml
+# 📌 Creates a pod using the service account
+
+kubectl get clusterrolebinding pod-reader-binding-global
+# 📌 Confirms the binding exists
+
+kubectl describe clusterrolebinding pod-reader-binding-global
+# 📌 Shows which SA is bound to which ClusterRole
+
+kubectl get clusterrole pod-reader-global
+# 📌 Confirms the ClusterRole was created
+
+kubectl describe clusterrole pod-reader-global
+# 📌 See what permissions are attached (rules)
+
+kubectl get serviceaccounts
+# 📌 Lists all ServiceAccounts in the 'default' namespace
+
+kubectl describe serviceaccount flask-service-account
+# 📌 Detailed info including secrets linked to this SA
+
+kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
+
+kubectl get ingress
+kubectl describe ingress <your-ingress-name>
+
+curl http://<ingress-ip>/
+curl -u <username>:<password> http://<ingress-ip>/   # for basic auth
+
+kubectl get nodes --show-labels
+# 📌 Used to schedule pods on specific nodes
+
+kubectl describe node <node-name> | grep -i taints
+
+
+kubectl taint nodes <node-name> key=value:NoSchedule
+# ❗️Adds a taint
+
+kubectl taint nodes <node-name> key:NoSchedule-
+# ❌ Removes the taint
+
+
+
+kubectl get pods
+kubectl describe pod <pod-name>
+kubectl logs <pod-name>
+
+kubectl get svc
+kubectl describe svc <service-name>
+
+kubectl get deployments
+kubectl describe deployment <deployment-name>
+
+
+kubectl exec -it <pod> -- nslookup flask-service
+# 📌 Test internal DNS
+
+kubectl exec -it <pod> -- curl http://flask-service:5000
+# 📌 Test internal service reachability
