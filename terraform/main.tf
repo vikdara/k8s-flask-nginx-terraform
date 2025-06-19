@@ -1,11 +1,11 @@
 # Configure Kubernetes provider
 provider "kubernetes" {
-  config_path = "~/.kube/config" # this is the config path 
+  config_path = "~/.kube/config"                                                               # this is the config path 
 }
 
 
-resource "kubernetes_service_account" "flask_service_account" { # create a service account which help in  crucial for managing the identity and permissions of pods 
-  metadata {                                                    # default service account do not have much permissions
+resource "kubernetes_service_account" "flask_service_account" {                               # create a service account which help in  crucial for managing the identity and permissions of pods 
+  metadata {                                                                                  # default service account do not have much permissions
     name      = "flask-serviceaccount"
     namespace = "default"
   }
@@ -21,8 +21,8 @@ resource "kubernetes_secret" "nginx_basic_auth" {
 
   data = {
 
-    auth = file("${path.module}/.htpasswd") # ${path.module} refers to the current Terraform module folder and there we have the file htpasswd  .
-  }                                         # terraform read the content of the file for the auth 
+    auth = file("${path.module}/.htpasswd")                                                    # ${path.module} refers to the current Terraform module folder and there we have the file htpasswd  .
+  }                                                                                            # terraform read the content of the file for the auth 
 
 
   type = "Opaque"
@@ -31,11 +31,11 @@ resource "kubernetes_secret" "nginx_basic_auth" {
 # ConfigMap for NGINX config
 resource "kubernetes_config_map" "nginx_config" {
   metadata {
-    name      = "nginx-config" # ConfigMaps store non-sensitive configuration files, env values, etc.
+    name      = "nginx-config"                                                                             # ConfigMaps store non-sensitive configuration files, env values, etc.
     namespace = "default"
   }
 
-  data = { # default.conf is the name of the file that will be mounted inside the NGINX pod.
+  data = {                                                                                                 # default.conf is the name of the file that will be mounted inside the NGINX pod.
     "default.conf" = <<-EOF
       server {
           listen 80;
@@ -52,7 +52,7 @@ resource "kubernetes_config_map" "nginx_config" {
 
               proxy_pass http://flask-service:5000;
               proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Real-IP $remote_addr;                                                
           }
       }
     EOF
@@ -65,12 +65,12 @@ resource "kubernetes_pod" "flask_pod" {
     name      = "flask-pod"
     namespace = "default"
     labels = {
-      app = "flask" # Used for selecting this pod via Services 
+      app = "flask"                                                                                          # Used for selecting this pod via Services 
     }
   }
 
   spec {
-    service_account_name = kubernetes_service_account.flask_service_account.metadata[0].name # specifies which account used for RBAC
+    service_account_name = kubernetes_service_account.flask_service_account.metadata[0].name                  # specifies which account used for RBAC
 
     container {
       name  = "flask"
@@ -166,15 +166,16 @@ resource "kubernetes_pod" "nginx_pod" {
       volume_mount {
         name       = "nginx-config-volume"
         mount_path = "/etc/nginx/conf.d/default.conf"
-        sub_path   = "default.conf"      # 	Mount just one file (default.conf) from the volume, not the whole folder
+        sub_path   = "default.conf"                                # 	Mount just one file (default.conf) from the volume, not the whole folder
         read_only  = true
       }
 
       volume_mount {
         name       = "nginx-auth-volume"
         mount_path = "/etc/nginx/auth/.htpasswd"
-        sub_path   = ".htpasswd" #at this intially i am using the auth there and when i check the logs of nginx pod i got the error that is it a directory and get error 500 internal server error 
-        read_only  = true
+        sub_path   = ".htpasswd"                                   #at this intially i am using the auth there and when i check the logs of nginx pod i got the error that 
+        read_only  = true                                                          # is it a directory and get error 500 internal server error 
+       
       }
 
 
@@ -185,10 +186,10 @@ resource "kubernetes_pod" "nginx_pod" {
     volume {
       name = "nginx-config-volume"
 
-      config_map {                     # Volume ka data ConfigMap se aayega
+      config_map {                                                # Volume ka data ConfigMap se aayega
         name = kubernetes_config_map.nginx_config.metadata[0].name
 
-        items {                          # mount only specific keys from the ConfigMap instead of all of them
+        items {                                                   # mount only specific keys from the ConfigMap instead of all of them
           key  = "default.conf"
           path = "default.conf"
         }
@@ -220,6 +221,7 @@ resource "kubernetes_pod" "nginx_pod" {
     }
   }
 }
+#------------------------------service-------------------------------------------------------------------------------------------------------------------
 # Provide a stable IP and DNS name to access a set of Pods (selected via labels)
 # Service for Flask app 
 resource "kubernetes_service" "flask_service" {
@@ -229,8 +231,8 @@ resource "kubernetes_service" "flask_service" {
   }
 
   spec {
-    selector = {         # Service unhi pods ko target karega jinke label me app=flask
-      app = "flask"       #  this service will route traffic to that pod via http://flask-service:5000 inside the cluster.
+    selector = {                                                  # Service unhi pods ko target karega jinke label me app=flask
+      app = "flask"                                               #  this service will route traffic to that pod via http://flask-service:5000 inside the cluster.
     }
 
     port {
@@ -254,17 +256,17 @@ resource "kubernetes_service" "nginx_service" {
     }
 
     port {
-      port        = 80       # svc listens on 80
-      target_port = 80      # Pod's container also exposes port 80
+      port        = 80                                                     # svc listens on 80
+      target_port = 80                                                    # Pod's container also exposes port 80
       protocol    = "TCP"
     }
 
-    type = "ClusterIP"          # Default — means service is only accessible inside the cluster
+    type = "ClusterIP"                                                        # Default — means service is only accessible inside the cluster
   }
 }
 
 # ClusterRole with namespaces access
-resource "kubernetes_cluster_role" "pod_reader" {
+resource "kubernetes_cluster_role" "pod_reader" {                            # actions (verbs) can be performed on what resources (pods, namespaces)
   metadata {
     name = "pod-reader-global"
   }
@@ -277,13 +279,13 @@ resource "kubernetes_cluster_role" "pod_reader" {
 }
 
 # Bind ServiceAccount to ClusterRole
-resource "kubernetes_cluster_role_binding" "read_pods_global" {
+resource "kubernetes_cluster_role_binding" "read_pods_global" {                     # Binds the above role to a ServiceAccount called flask_service_account in the default namespace.
   metadata {
     name = "pod-reader-binding-global"
   }
 
   role_ref {
-    api_group = "rbac.authorization.k8s.io"
+    api_group = "rbac.authorization.k8s.io"     
     kind      = "ClusterRole"
     name      = kubernetes_cluster_role.pod_reader.metadata[0].name
   }
@@ -295,13 +297,13 @@ resource "kubernetes_cluster_role_binding" "read_pods_global" {
   }
 }
 
-# Ingress
+#-------------------- Ingress----------------------------------------------------------------------------------------------------------------------------------------------------------
 resource "kubernetes_ingress_v1" "pod_check_ingress" {
   metadata {
     name      = "pod-check-ingress"
     namespace = "default"
-    annotations = {               # extra instruction 
-      "nginx.ingress.kubernetes.io/rewrite-target"  = "/"   #"Jo bhi path aaye — /something, use replace karke / bana do."
+    annotations = {                                                   # extra instruction 
+      "nginx.ingress.kubernetes.io/rewrite-target"  = "/"            # Jo bhi path aaye — /something, use replace karke / bana do.
       "nginx.ingress.kubernetes.io/ssl-redirect"    = "true"         # 	Automatically redirect HTTP → HTTPS
       "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"         # 	TLS traffic directly passed to backend (used if backend like NGINX terminates TLS)
     }
@@ -310,7 +312,7 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
   spec {
     tls {            # used for https configuration 
       hosts       = ["vikas.appperfect.com"]
-      secret_name = "vikas-tls-cert"   # "SSL certificate aur private key is secret me milega jiska naam vikas-tls-cert ha
+      secret_name = "vikas-tls-cert"                                # "SSL certificate aur private key is secret me milega jiska naam vikas-tls-cert ha
     }
 
     rule {
@@ -318,9 +320,9 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
       http {
         path {
           path      = "/"
-          path_type = "Prefix"          #  path_type = "Prefix"
-                                        # Means: match any path that starts with /
-                                         #Agar aap Exact use karte to sirf / match hota
+          path_type = "Prefix"                                  # path_type = "Prefix"
+                                                                # Means: match any path that starts with /
+                                                                # Agar aap Exact use karte to sirf / match hota
 
           backend {
             service {
@@ -334,22 +336,25 @@ resource "kubernetes_ingress_v1" "pod_check_ingress" {
       }
     }
   }
-}
+}  
+
+
+#-----------------------demo for test---------------------------------------------------------------------------------------------------------------------------------
 
 # Namespace to test the namespace is created or not 
 resource "kubernetes_namespace" "pod_check" {
   metadata {
-    name = "pod-check" #this is the namespace for the new pod creation 
+    name = "pod-check"                                                                             #this is the namespace for the new pod creation 
   }
 }
 
 resource "kubernetes_pod" "test_pod_default" {
   metadata {
     name      = "test-pod-default"
-    namespace = kubernetes_namespace.pod_check.metadata[0].name # this is the new pod with name 
+    namespace = kubernetes_namespace.pod_check.metadata[0].name                                    # this is the new pod with name 
   }
 
-  spec { # these are the spec for the new pod
+  spec {                                                                                           # these are the spec for the new pod
     container {
       name  = "nginx"
       image = "nginx:latest"
@@ -359,16 +364,15 @@ resource "kubernetes_pod" "test_pod_default" {
 
 
 
-User → https://vikas.appperfect.com/home
-     ↓
-Ingress checks host + path:
-    - Host = vikas.appperfect.com ✅
-    - Path starts with / ✅
-     ↓
-Ingress sends request to:
-    nginx-service:80 (ClusterIP)
-     ↓
-NGINX Pod (container on port 80)
-     ↓
-NGINX reverse-proxies to flask-service:5000
-
+  # User → https://vikas.appperfect.com/
+  # ↓
+  # Ingress checks host + path:
+  #  - Host = vikas.appperfect.com ✅
+  #  - Path starts with / ✅
+  #  ↓
+  #    Ingress sends request to:
+  # nginx-service:80 (ClusterIP)
+  # ↓
+  # NGINX Pod (container on port 80)
+  #  ↓
+  # NGINX reverse-proxies to flask-service:5000
